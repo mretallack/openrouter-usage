@@ -12,13 +12,30 @@ API does not return a value for them:
 
 | Sensor | Unit | Notes |
 | --- | --- | --- |
-| Credits Remaining | credits | Remaining allowance on the key's credit limit |
-| Account Balance | USD | `total_credits - total_usage` (needs a management key) |
-| Key Usage (all time) | credits | |
-| Key Usage Today / This Week / This Month | credits | UTC windows |
-| Key Credit Limit | credits | Only if a limit is set on the key |
-| Key Limit Used | % | Only if a limit is set on the key |
+| Account Balance | USD | `total_credits - total_usage` |
+| Account Credits Used | USD | `total_usage` — all-time, account-wide |
+| Account Credits Purchased | USD | `total_credits` |
+| Account Credits Remaining | % | Share of purchased credits remaining |
 | Free Model Requests Used | requests | Daily free-model request count |
+
+### Why there are no per-key sensors
+
+OpenRouter has two mutually exclusive key types:
+
+- **Inference keys** call model endpoints and accrue usage.
+- **Management keys** administer the account. They are the only kind that can
+  read `/api/v1/credits`, but they are
+  [barred from completion endpoints](https://openrouter.ai/docs/guides/overview/auth/management-api-keys),
+  so their own `usage`/`usage_daily`/`usage_weekly`/`usage_monthly` counters are
+  structurally always `0`.
+
+Because this tool needs a management key to report anything at all, publishing
+per-key usage entities would mean creating sensors that can only ever read zero.
+They are therefore omitted, and all spend is reported account-wide.
+
+If you want true per-key *daily / weekly / monthly* breakdowns, that requires an
+inference key as well as a management key — the two-key setup is not currently
+supported.
 
 ## Setup
 
@@ -43,15 +60,14 @@ password =
 
 ### API key type
 
-- A regular API key works for the key/usage sensors via `GET /api/v1/key`.
-- The **Account Balance** sensor needs a **management key**, which can call
-  `GET /api/v1/credits`. Without one, the other sensors still publish and a
-  warning is printed.
+This tool requires a **management key**, which is the only type that can read
+`GET /api/v1/credits`. A regular inference key will be rejected (`403`) by that
+endpoint.
 
 ## Endpoints used
 
-- `GET https://openrouter.ai/api/v1/key` — key limits and usage
 - `GET https://openrouter.ai/api/v1/credits` — account credits purchased/used
+- `GET https://openrouter.ai/api/v1/key` — free-model request counts only
 
 ## Scheduling
 

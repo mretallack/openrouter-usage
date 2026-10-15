@@ -17,26 +17,24 @@ DEVICE = {
     "model": "Credits API",
 }
 
+# Account-wide sensors, sourced from GET /api/v1/credits.
+#
+# Per-key usage sensors are deliberately absent: reading /credits (and therefore
+# running at all) requires a management key, and management keys are barred from
+# OpenRouter's completion endpoints, so their own usage counters are always 0.
+# A management key can never report per-key usage, so those entities would only
+# ever read zero.
+#
 # (key, name, unit, icon, value_template, device_class)
 SENSORS = [
-    ("credits_remaining", "Credits Remaining", "credits", "mdi:credit-card-outline",
-     "{{ value_json.credits_remaining }}", None),
     ("account_balance", "Account Balance", "USD", "mdi:cash",
      "{{ value_json.account_balance }}", "monetary"),
-    ("key_usage", "Key Usage (all time)", "credits", "mdi:chart-line",
-     "{{ value_json.key_usage }}", None),
-    ("key_usage_daily", "Key Usage Today", "credits", "mdi:calendar-today",
-     "{{ value_json.key_usage_daily }}", None),
-    ("key_usage_weekly", "Key Usage This Week", "credits", "mdi:calendar-week",
-     "{{ value_json.key_usage_weekly }}", None),
-    ("key_usage_monthly", "Key Usage This Month", "credits", "mdi:calendar-month",
-     "{{ value_json.key_usage_monthly }}", None),
-    ("key_limit", "Key Credit Limit", "credits", "mdi:speedometer",
-     "{{ value_json.key_limit }}", None),
-    ("key_limit_percent", "Key Limit Used", "%", "mdi:percent",
-     "{{ value_json.key_limit_percent }}", None),
-    ("free_model_requests_used", "Free Model Requests Used", "requests",
-     "mdi:gift-outline", "{{ value_json.free_model_requests_used }}", None),
+    ("account_credits_used", "Account Credits Used", "USD", "mdi:chart-line",
+     "{{ value_json.account_credits_used }}", "monetary"),
+    ("account_credits_purchased", "Account Credits Purchased", "USD", "mdi:credit-card-outline",
+     "{{ value_json.account_credits_purchased }}", "monetary"),
+    ("account_credits_remaining_percent", "Account Credits Remaining", "%", "mdi:percent",
+     "{{ value_json.account_credits_remaining_percent }}", None),
 ]
 
 
@@ -50,49 +48,36 @@ def api_get(path, api_key):
 
 
 def get_usage(api_key):
-    key_data = api_get("/key", api_key).get("data", {})
+    credits = api_get("/credits", api_key).get("data", {})
+    total = credits.get("total_credits")
+    used = credits.get("total_usage")
 
-    # OpenRouter returns the masked API key as the label when the key has no
-    # human-set label. Never publish the credential itself over MQTT.
-    label = key_data.get("label") or ""
-    if api_key[:12] and api_key[:12] in label:
-        label = "unnamed key"
+    if total is None or used is None:
+        raise RuntimeError(f"unexpected /credits response: {credits!r}")
 
     usage = {
-        "key_label": label or "unnamed key",
-        "key_usage": key_data.get("usage"),
-        "key_usage_daily": key_data.get("usage_daily"),
-        "key_usage_weekly": key_data.get("usage_weekly"),
-        "key_usage_monthly": key_data.get("usage_monthly"),
-        "key_limit": key_data.get("limit"),
-        "credits_remaining": key_data.get("limit_remaining"),
-        "is_free_tier": key_data.get("is_free_tier"),
+        "account_credits_purchased": total,
+        "account_credits_used": used,
+        "account_balance": round(total - used, 4),
     }
 
-    # Percentage of the key's credit limit consumed (only when a limit is set).
-    limit = key_data.get("limit")
-    if limit:
-        used = limit - (key_data.get("limit_remaining") or 0)
-        usage["key_limit_percent"] = round(used / limit * 100, 1)
+    if total:
+        usage["account_credits_remaining_percent"] = round((total - used) / total * 100, 1)
+
+    # Free-model request counts come from /key; they are not usage and are
+    # valid for any key type, so they are still reported.
+    try:
+        key_data = api_get("/key", api_key).get("data", {}) or {}
+    except urllib.error.HTTPError as err:
+        if err.code not in (401, 403):
+            raise
+        print(f"warning: /key unavailable ({err.code})", file=sys.stderr)
+        return usage
 
     free = key_data.get("free_model_daily_requests") or {}
     usage["free_model_requests_used"] = free.get("used")
     usage["free_model_requests_limit"] = free.get("limit")
-
-    # Account balance needs a management key; degrade gracefully if unavailable.
-    try:
-        credits = api_get("/credits", api_key).get("data", {})
-        total = credits.get("total_credits")
-        used = credits.get("total_usage")
-        if total is not None and used is not None:
-            usage["account_balance"] = round(total - used, 4)
-            usage["account_credits_purchased"] = total
-            usage["account_credits_used"] = used
-    except urllib.error.HTTPError as err:
-        if err.code not in (401, 403):
-            raise
-        print(f"warning: /credits unavailable ({err.code}); "
-              "balance sensors need a management key", file=sys.stderr)
+    usage["is_free_tier"] = key_data.get("is_free_tier")
 
     return usage
 
