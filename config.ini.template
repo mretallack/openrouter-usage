@@ -1,0 +1,8 @@
+[openrouter]
+api_key =
+
+[mqtt]
+host = localhost
+port = 1883
+username =
+password =
