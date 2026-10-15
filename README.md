@@ -2,8 +2,9 @@
 
 Publish [OpenRouter](https://openrouter.ai) credit usage to Home Assistant over
 MQTT using discovery. A sibling of
-[kiro-usage](https://github.com/mark-kiro/kiro-usage), but instead of shelling
-out to a CLI it queries the OpenRouter HTTP API directly with an API key.
+[kiro-monitor](https://github.com/mretallack/kiro-monitor), but instead of
+shelling out to a CLI it queries the OpenRouter HTTP API directly with an API
+key.
 
 ## Sensors
 
@@ -16,7 +17,10 @@ API does not return a value for them:
 | Account Credits Used | USD | `total_usage` — all-time, account-wide |
 | Account Credits Purchased | USD | `total_credits` |
 | Account Credits Remaining | % | Share of purchased credits remaining |
-| Free Model Requests Used | requests | Daily free-model request count |
+
+All four are `monetary` except the percentage. The daily free-model request
+count is included in the MQTT state topic (`free_model_requests_used` /
+`free_model_requests_limit`) but is not exposed as a Home Assistant entity.
 
 ### Why there are no per-key sensors
 
@@ -45,6 +49,12 @@ $EDITOR config.ini          # add your API key and MQTT broker details
 make run
 ```
 
+### API key type
+
+This tool requires a **management key**, which is the only type that can read
+`GET /api/v1/credits`. A regular inference key will be rejected (`403`) by that
+endpoint.
+
 `config.ini`:
 
 ```ini
@@ -58,12 +68,6 @@ username =
 password =
 ```
 
-### API key type
-
-This tool requires a **management key**, which is the only type that can read
-`GET /api/v1/credits`. A regular inference key will be rejected (`403`) by that
-endpoint.
-
 ## Endpoints used
 
 - `GET https://openrouter.ai/api/v1/credits` — account credits purchased/used
@@ -71,11 +75,14 @@ endpoint.
 
 ## Scheduling
 
-Run it from cron, a systemd timer, or however you schedule `kiro-usage`:
+Run it from cron, a systemd timer, or however you schedule `kiro-monitor`:
 
 ```
-*/15 * * * * cd /path/to/openrouter-usage && make run >/dev/null 2>&1
+0 * * * * cd /path/to/openrouter-usage && make run >/dev/null 2>&1
 ```
+
+That runs hourly. The free-model counter resets daily, so anything from hourly
+to six-hourly is reasonable.
 
 ## License
 
